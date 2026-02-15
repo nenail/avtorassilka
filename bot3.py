@@ -5,7 +5,6 @@ from aiogram.filters import Command
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from telethon.tl.functions.contacts import SearchRequest
 from telethon.tl.types import Channel
-from main import check_admin
 from datetime import datetime
 from colorama import Fore, Style, init
 
@@ -51,7 +50,6 @@ CREATE TABLE IF NOT EXISTS users (
 """)
 conn.commit()
 count_send = 0
-# check_admin()
 conn2 = sqlite3.connect("users.db", check_same_thread=False)  # Важно для aiogram!
 cursor2 = conn2.cursor()
 cursor2.execute("""
@@ -484,4 +482,5 @@ async def main():
 if __name__ == '__main__':
     asyncio.run(main())
     # loop = asyncio.get_event_loop()
+
     # loop.run_until_complete(main())
