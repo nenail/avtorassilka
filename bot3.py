@@ -225,8 +225,10 @@ async def send_to_chat(chat_info):
                     if os.path.isfile(path):
                         photos.append(path)
 
-                # if photos:
-                #     await client.send_file(entity, photos, caption=MESSAGE_TEXT)
+                if photos:
+                    await client.send_file(entity, photos, caption=MESSAGE_TEXT)
+                    count_send += 1
+                    log(f"Отправлено в {name} задержка {delay}", "DEBUG")
                 else:
                     await client.send_message(entity, MESSAGE_TEXT)
                     count_send += 1
