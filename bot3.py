@@ -19,9 +19,8 @@ config_path = os.path.join(os.path.dirname(__file__), "config.json")
 with open(config_path, "r", encoding="utf-8") as f:
     config = json.load(f)
 
-import sys
+import subprocess
 subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
-
 
 topics = config["topics"]
 api_id = config["api_id"]
@@ -489,5 +488,6 @@ if __name__ == '__main__':
     # loop = asyncio.get_event_loop()
 
     # loop.run_until_complete(main())
+
 
 
