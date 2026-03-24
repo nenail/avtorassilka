@@ -19,7 +19,7 @@ import sqlite3
 import random
 import time
 
-# from win32trace import flush
+from win32trace import flush
 
 config_path = os.path.join(os.path.dirname(__file__), "config.json")
 
@@ -44,6 +44,9 @@ bot = Bot(token=bot_token)
 dp = Dispatcher()
 chat_id = 8172845069
 
+flood_error = 0
+fluderror = False
+fluderrortime = 0
 
 conn = sqlite3.connect("chats.db", check_same_thread=False)
 cursor = conn.cursor()
