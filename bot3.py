@@ -18,7 +18,9 @@ import time
 import sqlite3
 import random
 import time
-#sjkgfks
+
+from win32trace import flush
+
 config_path = os.path.join(os.path.dirname(__file__), "config.json")
 
 with open(config_path, "r", encoding="utf-8") as f:
@@ -281,6 +283,8 @@ async def sendmessage():
             print(f"Жду {fluderrortime} и потом кончаю вані в рота!))))❤️❤️🤣🤣😂😂")
             await asyncio.sleep(fluderrortime)
             print("Фуг была потная катка еле кончил, за 30 минут кончил 10 раз. Вы что не верите?????(((((")
+            fluderrortime = 0
+            fluderror = False
 
         if flood_error >= 4:
             sys.exit()
