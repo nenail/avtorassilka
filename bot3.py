@@ -245,8 +245,6 @@ async def send_to_chat(chat_info):
                     count_send += 1
                     log(f"Отправлено в {name} задержка {delay}", "DEBUG")
         except errors.FloodWaitError as e:
-            global fluderror
-            global fluderrortime
             fluderror = True
             fluderrortime = e.seconds + 15
             log(f"Флуд ошибка жду еще {e.seconds}", "DEBUG")
@@ -269,7 +267,7 @@ async def sendmessage():
     global is_running
     if is_running:
         return
-
+    fluderror = False
     is_running = True
     log("Начинаю рассылку...", "INFO")
 
